@@ -36,6 +36,35 @@ export function buildProjectsApiUrl({ org }) {
   return `https://dev.azure.com/${org}/_apis/projects?api-version=${API_VERSION}`;
 }
 
+export function buildWiqlApiUrl({ org, project, top = 10 }) {
+  assertConfig({ org, project });
+
+  const encodedProject = encodeURIComponent(project);
+  return `https://dev.azure.com/${org}/${encodedProject}/_apis/wit/wiql?$top=${encodeURIComponent(
+    top
+  )}&api-version=${API_VERSION}`;
+}
+
+export function buildWorkItemsListApiUrl({ org, project, ids, fields = [] }) {
+  assertConfig({ org, project });
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error("ids are required");
+  }
+
+  const encodedProject = encodeURIComponent(project);
+  const params = new URLSearchParams({
+    ids: ids.join(","),
+    "api-version": API_VERSION
+  });
+
+  if (fields.length > 0) {
+    params.set("fields", fields.join(","));
+  }
+
+  return `https://dev.azure.com/${org}/${encodedProject}/_apis/wit/workitems?${params.toString()}`;
+}
+
 export function buildTaskPatchDocument({
   org,
   project,
@@ -203,8 +232,125 @@ export async function listProjects({ org, pat, fetchImpl = fetch }) {
   }));
 }
 
+export async function searchWorkItemsByIdPrefix({
+  org,
+  project,
+  pat,
+  idPrefix,
+  top = 10,
+  fetchImpl = fetch
+}) {
+  assertConfig({ org, project });
+
+  if (!pat) {
+    throw new Error("PAT is required to search Azure DevOps work items");
+  }
+
+  const range = buildWorkItemIdPrefixRange(idPrefix);
+
+  if (!range) {
+    return [];
+  }
+
+  const wiqlResponse = await fetchImpl(buildWiqlApiUrl({ org, project, top }), {
+    method: "POST",
+    headers: {
+      Authorization: buildBasicAuthHeader(pat),
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    },
+    body: JSON.stringify({
+      query: [
+        "SELECT [System.Id]",
+        "FROM WorkItems",
+        `WHERE [System.TeamProject] = '${escapeWiqlString(project)}'`,
+        `AND [System.Id] >= ${range.min}`,
+        `AND [System.Id] <= ${range.max}`,
+        "AND [System.State] <> 'Removed'",
+        "ORDER BY [System.Id] ASC"
+      ].join(" ")
+    })
+  });
+
+  const wiqlBody = await readJsonSafely(wiqlResponse);
+
+  if (!wiqlResponse.ok) {
+    const message =
+      wiqlBody?.message || wiqlBody?.error?.message || `Azure DevOps returned ${wiqlResponse.status}`;
+    const error = new Error(message);
+    error.status = wiqlResponse.status;
+    error.azureResponse = wiqlBody;
+    throw error;
+  }
+
+  const ids = (wiqlBody?.workItems || []).map((workItem) => workItem.id).filter(Boolean);
+
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const workItemsResponse = await fetchImpl(
+    buildWorkItemsListApiUrl({
+      org,
+      project,
+      ids,
+      fields: ["System.Id", "System.Title", "System.WorkItemType", "System.State"]
+    }),
+    {
+      method: "GET",
+      headers: {
+        Authorization: buildBasicAuthHeader(pat),
+        Accept: "application/json"
+      }
+    }
+  );
+
+  const workItemsBody = await readJsonSafely(workItemsResponse);
+
+  if (!workItemsResponse.ok) {
+    const message =
+      workItemsBody?.message ||
+      workItemsBody?.error?.message ||
+      `Azure DevOps returned ${workItemsResponse.status}`;
+    const error = new Error(message);
+    error.status = workItemsResponse.status;
+    error.azureResponse = workItemsBody;
+    throw error;
+  }
+
+  return (workItemsBody?.value || []).map((workItem) => ({
+    id: workItem.id,
+    title: workItem.fields?.["System.Title"] || "",
+    type: workItem.fields?.["System.WorkItemType"] || "",
+    state: workItem.fields?.["System.State"] || "",
+    url: workItem._links?.html?.href
+  }));
+}
+
+export function buildWorkItemIdPrefixRange(idPrefix, idLength = 6) {
+  const normalizedPrefix = String(idPrefix || "").trim();
+
+  if (!/^\d+$/.test(normalizedPrefix)) {
+    return null;
+  }
+
+  if (normalizedPrefix.length >= idLength) {
+    const id = Number(normalizedPrefix);
+    return { min: id, max: id };
+  }
+
+  return {
+    min: Number(normalizedPrefix.padEnd(idLength, "0")),
+    max: Number(normalizedPrefix.padEnd(idLength, "9"))
+  };
+}
+
 export function buildBasicAuthHeader(pat) {
   return `Basic ${Buffer.from(`:${pat}`).toString("base64")}`;
+}
+
+function escapeWiqlString(value) {
+  return String(value).replace(/'/g, "''");
 }
 
 function addOptionalField(patch, path, value) {

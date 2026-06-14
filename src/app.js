@@ -1,6 +1,11 @@
 import express from "express";
 import crypto from "node:crypto";
-import { createChildTask, listFields, listProjects } from "./azureDevOpsClient.js";
+import {
+  createChildTask,
+  listFields,
+  listProjects,
+  searchWorkItemsByIdPrefix
+} from "./azureDevOpsClient.js";
 import { normalizeTask, validateBulkRequest } from "./validation.js";
 
 const patSessions = new Map();
@@ -103,6 +108,34 @@ export function createApp({
         ok: true,
         count: projects.length,
         projects
+      });
+    } catch (error) {
+      res.status(error.status || 500).json({
+        ok: false,
+        error: summarizeAzureReadError(error)
+      });
+    }
+  });
+
+  app.get("/api/work-items/search", async (req, res) => {
+    const activePat = getSessionPat(req);
+    const activeProject = req.query.project ? String(req.query.project).trim() : project;
+    const idPrefix = req.query.q ? String(req.query.q).trim() : "";
+
+    try {
+      const workItems = await searchWorkItemsByIdPrefix({
+        org,
+        project: activeProject,
+        pat: activePat,
+        idPrefix,
+        top: 10,
+        fetchImpl
+      });
+
+      res.json({
+        ok: true,
+        count: workItems.length,
+        workItems
       });
     } catch (error) {
       res.status(error.status || 500).json({

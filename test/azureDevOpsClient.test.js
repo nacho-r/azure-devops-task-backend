@@ -4,9 +4,13 @@ import {
   buildProjectsApiUrl,
   buildTaskPatchDocument,
   createChildTask,
+  buildWiqlApiUrl,
+  buildWorkItemsListApiUrl,
+  buildWorkItemIdPrefixRange,
   buildWorkItemApiUrl,
   buildWorkItemReferenceUrl,
-  listProjects
+  listProjects,
+  searchWorkItemsByIdPrefix
 } from "../src/azureDevOpsClient.js";
 import { normalizeTask, validateBulkRequest } from "../src/validation.js";
 
@@ -29,6 +33,37 @@ test("buildProjectsApiUrl creates the projects endpoint", () => {
     buildProjectsApiUrl({ org: "achsdev" }),
     "https://dev.azure.com/achsdev/_apis/projects?api-version=7.1"
   );
+});
+
+test("buildWiqlApiUrl creates the WIQL endpoint", () => {
+  assert.equal(
+    buildWiqlApiUrl({ org: "achsdev", project: "CRM", top: 10 }),
+    "https://dev.azure.com/achsdev/CRM/_apis/wit/wiql?$top=10&api-version=7.1"
+  );
+});
+
+test("buildWorkItemsListApiUrl creates the work items list endpoint", () => {
+  assert.equal(
+    buildWorkItemsListApiUrl({
+      org: "achsdev",
+      project: "CRM",
+      ids: [415192],
+      fields: ["System.Id", "System.Title"]
+    }),
+    "https://dev.azure.com/achsdev/CRM/_apis/wit/workitems?ids=415192&api-version=7.1&fields=System.Id%2CSystem.Title"
+  );
+});
+
+test("buildWorkItemIdPrefixRange creates a six digit id range", () => {
+  assert.deepEqual(buildWorkItemIdPrefixRange("4151"), {
+    min: 415100,
+    max: 415199
+  });
+  assert.deepEqual(buildWorkItemIdPrefixRange("415192"), {
+    min: 415192,
+    max: 415192
+  });
+  assert.equal(buildWorkItemIdPrefixRange("abc"), null);
 });
 
 test("buildTaskPatchDocument links the task to the parent", () => {
@@ -185,6 +220,74 @@ test("listProjects returns only sanitized project fields", async () => {
       name: "CRM",
       state: "wellFormed",
       visibility: "private"
+    }
+  ]);
+});
+
+test("searchWorkItemsByIdPrefix returns only sanitized work item fields", async () => {
+  const requests = [];
+  const result = await searchWorkItemsByIdPrefix({
+    org: "achsdev",
+    project: "CRM",
+    pat: "fake-pat",
+    idPrefix: "4151",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+
+      if (String(url).includes("/_apis/wit/wiql")) {
+        return new Response(
+          JSON.stringify({
+            workItems: [{ id: 415192 }]
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json"
+            }
+          }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          value: [
+            {
+              id: 415192,
+              rev: 2,
+              fields: {
+                "System.Title": "Gestion de grupos",
+                "System.WorkItemType": "User Story",
+                "System.State": "Active",
+                "System.Description": "No debe salir"
+              },
+              _links: {
+                html: {
+                  href: "https://example.test/work-item/415192"
+                }
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+  });
+
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].options.body, /System.Id\] >= 415100/);
+  assert.match(requests[0].options.body, /System.Id\] <= 415199/);
+  assert.deepEqual(result, [
+    {
+      id: 415192,
+      title: "Gestion de grupos",
+      type: "User Story",
+      state: "Active",
+      url: "https://example.test/work-item/415192"
     }
   ]);
 });
