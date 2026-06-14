@@ -1,0 +1,248 @@
+const API_VERSION = "7.1";
+const TASK_WORK_ITEM_TYPE = "Task";
+const PARENT_RELATION_TYPE = "System.LinkTypes.Hierarchy-Reverse";
+const DEFAULT_TASK_TYPE_FIELD = "Microsoft.VSTS.CMMI.TaskType";
+
+export function buildWorkItemApiUrl({ org, project, workItemType = TASK_WORK_ITEM_TYPE }) {
+  assertConfig({ org, project });
+
+  const encodedProject = encodeURIComponent(project);
+  const encodedWorkItemType = encodeURIComponent(`$${workItemType}`);
+
+  return `https://dev.azure.com/${org}/${encodedProject}/_apis/wit/workitems/${encodedWorkItemType}?api-version=${API_VERSION}`;
+}
+
+export function buildWorkItemReferenceUrl({ org, project, workItemId }) {
+  assertConfig({ org, project });
+
+  if (!workItemId) {
+    throw new Error("workItemId is required");
+  }
+
+  const encodedProject = encodeURIComponent(project);
+  return `https://dev.azure.com/${org}/${encodedProject}/_apis/wit/workItems/${workItemId}`;
+}
+
+export function buildFieldsApiUrl({ org, project }) {
+  assertConfig({ org, project });
+
+  const encodedProject = encodeURIComponent(project);
+  return `https://dev.azure.com/${org}/${encodedProject}/_apis/wit/fields?api-version=${API_VERSION}`;
+}
+
+export function buildProjectsApiUrl({ org }) {
+  assertOrg({ org });
+
+  return `https://dev.azure.com/${org}/_apis/projects?api-version=${API_VERSION}`;
+}
+
+export function buildTaskPatchDocument({
+  org,
+  project,
+  parentId,
+  task,
+  taskTypeField = DEFAULT_TASK_TYPE_FIELD
+}) {
+  if (!parentId) {
+    throw new Error("parentId is required");
+  }
+
+  if (!task?.title?.trim()) {
+    throw new Error("task.title is required");
+  }
+
+  const patch = [
+    {
+      op: "add",
+      path: "/fields/System.Title",
+      value: task.title.trim()
+    }
+  ];
+
+  addOptionalField(patch, "/fields/System.Description", task.description);
+  addOptionalField(patch, "/fields/System.AssignedTo", task.assignedTo);
+  addOptionalField(patch, "/fields/Microsoft.VSTS.Scheduling.RemainingWork", task.remainingWork);
+  addOptionalField(
+    patch,
+    "/fields/Microsoft.VSTS.Scheduling.OriginalEstimate",
+    task.originalEstimate
+  );
+  addOptionalField(patch, `/fields/${taskTypeField}`, task.taskType);
+  addOptionalField(patch, "/fields/System.Tags", task.tags);
+
+  patch.push({
+    op: "add",
+    path: "/relations/-",
+    value: {
+      rel: PARENT_RELATION_TYPE,
+      url: buildWorkItemReferenceUrl({ org, project, workItemId: parentId }),
+      attributes: {
+        comment: "Creada automaticamente desde herramienta interna"
+      }
+    }
+  });
+
+  return patch;
+}
+
+export async function createChildTask({
+  org,
+  project,
+  pat,
+  parentId,
+  task,
+  taskTypeField = DEFAULT_TASK_TYPE_FIELD,
+  fetchImpl = fetch
+}) {
+  assertConfig({ org, project });
+
+  if (!pat) {
+    throw new Error("PAT is required when dryRun is false");
+  }
+
+  const patchDocument = buildTaskPatchDocument({ org, project, parentId, task, taskTypeField });
+  const response = await fetchImpl(buildWorkItemApiUrl({ org, project }), {
+    method: "POST",
+    headers: {
+      Authorization: buildBasicAuthHeader(pat),
+      "Content-Type": "application/json-patch+json"
+    },
+    body: JSON.stringify(patchDocument)
+  });
+
+  const body = await readJsonSafely(response);
+
+  if (!response.ok) {
+    const message = body?.message || body?.error?.message || `Azure DevOps returned ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.azureResponse = body;
+    throw error;
+  }
+
+  return {
+    id: body.id,
+    url: body._links?.html?.href || body.url
+  };
+}
+
+export async function listFields({ org, project, pat, search, fetchImpl = fetch }) {
+  assertConfig({ org, project });
+
+  if (!pat) {
+    throw new Error("PAT is required to list Azure DevOps fields");
+  }
+
+  const response = await fetchImpl(buildFieldsApiUrl({ org, project }), {
+    method: "GET",
+    headers: {
+      Authorization: buildBasicAuthHeader(pat),
+      Accept: "application/json"
+    }
+  });
+
+  const body = await readJsonSafely(response);
+
+  if (!response.ok) {
+    const message = body?.message || body?.error?.message || `Azure DevOps returned ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.azureResponse = body;
+    throw error;
+  }
+
+  const fields = body?.value || [];
+  const normalizedSearch = search ? String(search).toLowerCase().trim() : "";
+  const filteredFields = normalizedSearch
+    ? fields.filter((field) =>
+        [field.name, field.referenceName, field.description]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedSearch))
+      )
+    : fields;
+
+  return filteredFields.map((field) => ({
+    name: field.name,
+    referenceName: field.referenceName,
+    type: field.type,
+    readOnly: field.readOnly,
+    supportedOperations: field.supportedOperations?.map((operation) => operation.name)
+  }));
+}
+
+export async function listProjects({ org, pat, fetchImpl = fetch }) {
+  assertOrg({ org });
+
+  if (!pat) {
+    throw new Error("PAT is required to list Azure DevOps projects");
+  }
+
+  const response = await fetchImpl(buildProjectsApiUrl({ org }), {
+    method: "GET",
+    headers: {
+      Authorization: buildBasicAuthHeader(pat),
+      Accept: "application/json"
+    }
+  });
+
+  const body = await readJsonSafely(response);
+
+  if (!response.ok) {
+    const message = body?.message || body?.error?.message || `Azure DevOps returned ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.azureResponse = body;
+    throw error;
+  }
+
+  return (body?.value || []).map((project) => ({
+    id: project.id,
+    name: project.name,
+    state: project.state,
+    visibility: project.visibility
+  }));
+}
+
+export function buildBasicAuthHeader(pat) {
+  return `Basic ${Buffer.from(`:${pat}`).toString("base64")}`;
+}
+
+function addOptionalField(patch, path, value) {
+  if (value === undefined || value === null || value === "") {
+    return;
+  }
+
+  patch.push({
+    op: "add",
+    path,
+    value
+  });
+}
+
+function assertConfig({ org, project }) {
+  assertOrg({ org });
+
+  if (!project) {
+    throw new Error("AZURE_DEVOPS_PROJECT is required");
+  }
+}
+
+function assertOrg({ org }) {
+  if (!org) {
+    throw new Error("AZURE_DEVOPS_ORG is required");
+  }
+}
+
+async function readJsonSafely(response) {
+  const text = await response.text();
+
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+}

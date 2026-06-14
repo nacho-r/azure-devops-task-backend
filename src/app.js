@@ -1,0 +1,287 @@
+import express from "express";
+import crypto from "node:crypto";
+import { createChildTask, listFields, listProjects } from "./azureDevOpsClient.js";
+import { normalizeTask, validateBulkRequest } from "./validation.js";
+
+const patSessions = new Map();
+const patCookieName = "azdo_pat_session";
+const patSessionMaxAgeMs = 8 * 60 * 60 * 1000;
+
+export function createApp({
+  org = process.env.AZURE_DEVOPS_ORG || "achsdev",
+  project = process.env.AZURE_DEVOPS_PROJECT || "CRM",
+  taskTypeField = process.env.AZURE_DEVOPS_TASK_TYPE_FIELD || "Microsoft.VSTS.CMMI.TaskType",
+  fetchImpl
+} = {}) {
+  const app = express();
+
+  app.use(express.json({ limit: "1mb" }));
+
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.get("/api/auth/pat/status", (req, res) => {
+    res.json({
+      ok: true,
+      configured: Boolean(getSessionPat(req))
+    });
+  });
+
+  app.post("/api/auth/pat", (req, res) => {
+    const requestPat = typeof req.body?.pat === "string" ? req.body.pat.trim() : "";
+
+    if (!requestPat) {
+      return res.status(400).json({
+        ok: false,
+        error: "PAT is required"
+      });
+    }
+
+    const sessionId = crypto.randomUUID();
+
+    patSessions.set(sessionId, {
+      pat: requestPat,
+      expiresAt: Date.now() + patSessionMaxAgeMs
+    });
+
+    res.setHeader(
+      "Set-Cookie",
+      `${patCookieName}=${sessionId}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(
+        patSessionMaxAgeMs / 1000
+      )}`
+    );
+    res.status(204).end();
+  });
+
+  app.delete("/api/auth/pat", (req, res) => {
+    const sessionId = getCookie(req, patCookieName);
+
+    if (sessionId) {
+      patSessions.delete(sessionId);
+    }
+
+    res.setHeader("Set-Cookie", `${patCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+    res.status(204).end();
+  });
+
+  app.get("/api/azure/fields", async (req, res) => {
+    const activePat = getSessionPat(req);
+    const activeProject = req.query.project ? String(req.query.project).trim() : project;
+
+    try {
+      const fields = await listFields({
+        org,
+        project: activeProject,
+        pat: activePat,
+        search: req.query.search,
+        fetchImpl
+      });
+
+      res.json({
+        ok: true,
+        count: fields.length,
+        fields
+      });
+    } catch (error) {
+      res.status(error.status || 500).json({
+        ok: false,
+        error: summarizeAzureReadError(error)
+      });
+    }
+  });
+
+  app.get("/api/azure/projects", async (req, res) => {
+    const activePat = getSessionPat(req);
+
+    try {
+      const projects = await listProjects({
+        org,
+        pat: activePat,
+        fetchImpl
+      });
+
+      res.json({
+        ok: true,
+        count: projects.length,
+        projects
+      });
+    } catch (error) {
+      res.status(error.status || 500).json({
+        ok: false,
+        error: summarizeAzureReadError(error)
+      });
+    }
+  });
+
+  app.post("/api/tasks/bulk", async (req, res) => {
+    const validationErrors = validateBulkRequest(req.body);
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        errors: validationErrors
+      });
+    }
+
+    const parentId = String(req.body.parentId).trim();
+    const activeProject = req.body.project ? String(req.body.project).trim() : project;
+    const dryRun = req.body.dryRun !== false;
+    const activePat = getSessionPat(req);
+    const activeTaskTypeField = req.body.taskTypeField
+      ? String(req.body.taskTypeField).trim()
+      : taskTypeField;
+    const tasks = req.body.tasks.map(normalizeTask);
+
+    if (dryRun) {
+      return res.json({
+        ok: true,
+        dryRun: true,
+        project: activeProject,
+        parentId,
+        total: tasks.length,
+        tasks: buildDryRunTaskResults(tasks)
+      });
+    }
+
+    const results = [];
+
+    for (const [index, task] of tasks.entries()) {
+      try {
+        const createdTask = await createChildTask({
+          org,
+          project: activeProject,
+          pat: activePat,
+          parentId,
+          task,
+          taskTypeField: activeTaskTypeField,
+          fetchImpl
+        });
+
+        results.push({
+          index,
+          status: "created",
+          title: task.title,
+          id: createdTask.id,
+          url: createdTask.url
+        });
+      } catch (error) {
+        results.push({
+          index,
+          status: "failed",
+          title: task.title,
+          error: summarizeCreateError(error)
+        });
+      }
+    }
+
+    const created = results.filter((result) => result.status === "created").length;
+    const failed = results.length - created;
+
+    res.status(failed > 0 ? 207 : 201).json({
+      ok: failed === 0,
+      dryRun: false,
+      project: activeProject,
+      parentId,
+      total: results.length,
+      created,
+      failed,
+      results
+    });
+  });
+
+  app.use((err, _req, res, _next) => {
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  });
+
+  return app;
+}
+
+export function buildDryRunTaskResults(tasks) {
+  return tasks.map((task, index) => ({
+    index,
+    status: "validated",
+    title: task.title
+  }));
+}
+
+export function summarizeCreateError(error) {
+  if (error?.status === 401 || error?.status === 403) {
+    return "No autorizado para crear tasks en Azure DevOps.";
+  }
+
+  if (error?.status === 404) {
+    return "No se encontro el proyecto, work item padre o endpoint configurado.";
+  }
+
+  if (error?.status === 400 && /required|invalidempty|tf401320/i.test(error.message)) {
+    return "Azure DevOps rechazo la task por campos requeridos o vacios.";
+  }
+
+  if (error?.status) {
+    return `Azure DevOps rechazo la task. Codigo ${error.status}.`;
+  }
+
+  return "No se pudo crear la task.";
+}
+
+export function summarizeAzureReadError(error) {
+  if (error?.status === 401 || error?.status === 403) {
+    return "No autorizado para consultar Azure DevOps.";
+  }
+
+  if (error?.status === 404) {
+    return "No se encontro el recurso solicitado en Azure DevOps.";
+  }
+
+  if (/PAT/i.test(error?.message || "")) {
+    return "PAT requerido para consultar Azure DevOps.";
+  }
+
+  if (error?.status) {
+    return `Azure DevOps rechazo la consulta. Codigo ${error.status}.`;
+  }
+
+  return "No se pudo consultar Azure DevOps.";
+}
+
+function getSessionPat(req) {
+  const sessionId = getCookie(req, patCookieName);
+
+  if (!sessionId) {
+    return undefined;
+  }
+
+  const session = patSessions.get(sessionId);
+
+  if (!session) {
+    return undefined;
+  }
+
+  if (session.expiresAt <= Date.now()) {
+    patSessions.delete(sessionId);
+    return undefined;
+  }
+
+  return session.pat;
+}
+
+function getCookie(req, name) {
+  const cookieHeader = req.get("cookie");
+
+  if (!cookieHeader) {
+    return undefined;
+  }
+
+  const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
+  const matchingCookie = cookies.find((cookie) => cookie.startsWith(`${name}=`));
+
+  if (!matchingCookie) {
+    return undefined;
+  }
+
+  return decodeURIComponent(matchingCookie.slice(name.length + 1));
+}
