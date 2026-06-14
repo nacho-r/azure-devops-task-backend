@@ -24,6 +24,9 @@ Edita `.env`:
 
 ```env
 PORT=3000
+HOST=127.0.0.1
+NODE_ENV=development
+FRONTEND_URL=http://localhost:5173
 AZURE_DEVOPS_ORG=achsdev
 AZURE_DEVOPS_PROJECT=CRM
 AZURE_DEVOPS_TASK_TYPE_FIELD=Custom.TasktypeDev
@@ -42,6 +45,19 @@ curl -X POST http://localhost:3000/api/auth/pat \
 
 El backend devuelve una cookie `HttpOnly` y usa esa sesion en `/api/tasks/bulk`.
 La sesion vive solo en memoria del proceso Node y se elimina al reiniciar el backend o al llamar `DELETE /api/auth/pat`.
+
+Para produccion en Render usa variables equivalentes a:
+
+```env
+HOST=0.0.0.0
+NODE_ENV=production
+FRONTEND_URL=https://tu-front.netlify.app
+AZURE_DEVOPS_ORG=achsdev
+AZURE_DEVOPS_PROJECT=CRM
+AZURE_DEVOPS_TASK_TYPE_FIELD=Custom.TasktypeDev
+```
+
+Con `NODE_ENV=production`, la cookie PAT se emite con `Secure` y `SameSite=None` para permitir llamadas desde el frontend publicado.
 
 `AZURE_DEVOPS_TASK_TYPE_FIELD` es el reference name del campo que Azure DevOps usa para "Task Type".
 Si tu proceso usa otro campo custom, cambia ese valor en `.env`.

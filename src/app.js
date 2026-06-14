@@ -6,15 +6,18 @@ import { normalizeTask, validateBulkRequest } from "./validation.js";
 const patSessions = new Map();
 const patCookieName = "azdo_pat_session";
 const patSessionMaxAgeMs = 8 * 60 * 60 * 1000;
+const isProduction = process.env.NODE_ENV === "production";
 
 export function createApp({
   org = process.env.AZURE_DEVOPS_ORG || "achsdev",
   project = process.env.AZURE_DEVOPS_PROJECT || "CRM",
   taskTypeField = process.env.AZURE_DEVOPS_TASK_TYPE_FIELD || "Microsoft.VSTS.CMMI.TaskType",
+  frontendUrl = process.env.FRONTEND_URL,
   fetchImpl
 } = {}) {
   const app = express();
 
+  app.use(buildCorsMiddleware(frontendUrl));
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/health", (_req, res) => {
@@ -45,12 +48,7 @@ export function createApp({
       expiresAt: Date.now() + patSessionMaxAgeMs
     });
 
-    res.setHeader(
-      "Set-Cookie",
-      `${patCookieName}=${sessionId}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(
-        patSessionMaxAgeMs / 1000
-      )}`
-    );
+    res.setHeader("Set-Cookie", buildPatCookie(sessionId, Math.floor(patSessionMaxAgeMs / 1000)));
     res.status(204).end();
   });
 
@@ -61,7 +59,7 @@ export function createApp({
       patSessions.delete(sessionId);
     }
 
-    res.setHeader("Set-Cookie", `${patCookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+    res.setHeader("Set-Cookie", buildPatCookie("", 0));
     res.status(204).end();
   });
 
@@ -198,6 +196,45 @@ export function createApp({
   });
 
   return app;
+}
+
+function buildCorsMiddleware(frontendUrl) {
+  const allowedOrigins = new Set(
+    [
+      ...(frontendUrl || "")
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+      ...(isProduction ? [] : ["http://localhost:5173", "http://127.0.0.1:5173"])
+    ]
+  );
+
+  return (req, res, next) => {
+    const origin = req.get("origin");
+
+    if (origin && allowedOrigins.has(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+      res.setHeader("Vary", "Origin");
+    }
+
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+
+    next();
+  };
+}
+
+function buildPatCookie(value, maxAgeSeconds) {
+  const sameSite = isProduction ? "None" : "Lax";
+  const secure = isProduction ? "; Secure" : "";
+
+  return `${patCookieName}=${encodeURIComponent(
+    value
+  )}; HttpOnly; SameSite=${sameSite}; Path=/; Max-Age=${maxAgeSeconds}${secure}`;
 }
 
 export function buildDryRunTaskResults(tasks) {
