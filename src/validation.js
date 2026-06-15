@@ -54,6 +54,8 @@ export function normalizeTask(task) {
     title: String(task.title).trim(),
     description: task.description ? String(task.description).trim() : undefined,
     assignedTo: task.assignedTo ? String(task.assignedTo).trim() : undefined,
+    areaPath: task.areaPath ? String(task.areaPath).trim() : undefined,
+    iterationPath: task.iterationPath ? String(task.iterationPath).trim() : undefined,
     taskType: task.taskType ? String(task.taskType).trim() : undefined,
     remainingWork,
     originalEstimate: explicitOriginalEstimate ?? remainingWork,

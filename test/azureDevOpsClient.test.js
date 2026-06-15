@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  buildClassificationNodesApiUrl,
   buildProjectsApiUrl,
   buildTaskPatchDocument,
   createChildTask,
   buildWiqlApiUrl,
   buildWorkItemsListApiUrl,
   buildWorkItemIdPrefixRange,
+  flattenClassificationNodes,
   buildWorkItemApiUrl,
   buildWorkItemReferenceUrl,
   listProjects,
@@ -32,6 +34,18 @@ test("buildProjectsApiUrl creates the projects endpoint", () => {
   assert.equal(
     buildProjectsApiUrl({ org: "achsdev" }),
     "https://dev.azure.com/achsdev/_apis/projects?api-version=7.1"
+  );
+});
+
+test("buildClassificationNodesApiUrl creates the classification nodes endpoint", () => {
+  assert.equal(
+    buildClassificationNodesApiUrl({
+      org: "achsdev",
+      project: "CRM",
+      structureGroup: "Areas",
+      depth: 10
+    }),
+    "https://dev.azure.com/achsdev/CRM/_apis/wit/classificationnodes/Areas?$depth=10&api-version=7.1"
   );
 });
 
@@ -66,6 +80,45 @@ test("buildWorkItemIdPrefixRange creates a six digit id range", () => {
   assert.equal(buildWorkItemIdPrefixRange("abc"), null);
 });
 
+test("flattenClassificationNodes returns sanitized full paths", () => {
+  assert.deepEqual(
+    flattenClassificationNodes({
+      id: 1,
+      name: "CRM",
+      structureType: "area",
+      hasChildren: true,
+      children: [
+        {
+          id: 2,
+          name: "Playbook-CO-SF",
+          structureType: "area",
+          hasChildren: false
+        }
+      ]
+    }),
+    [
+      {
+        id: 1,
+        name: "CRM",
+        path: "CRM",
+        structureType: "area",
+        hasChildren: true,
+        startDate: undefined,
+        finishDate: undefined
+      },
+      {
+        id: 2,
+        name: "Playbook-CO-SF",
+        path: "CRM\\Playbook-CO-SF",
+        structureType: "area",
+        hasChildren: false,
+        startDate: undefined,
+        finishDate: undefined
+      }
+    ]
+  );
+});
+
 test("buildTaskPatchDocument links the task to the parent", () => {
   const patch = buildTaskPatchDocument({
     org: "achsdev",
@@ -77,6 +130,8 @@ test("buildTaskPatchDocument links the task to the parent", () => {
       assignedTo: "usuario@empresa.com",
       remainingWork: 4,
       originalEstimate: 4,
+      areaPath: "CRM\\Playbook-CO-SF",
+      iterationPath: "CRM\\ContinuidadCSF\\Sprint 11",
       taskType: "Development",
       tags: "CRM; Automatizacion"
     }
@@ -92,6 +147,21 @@ test("buildTaskPatchDocument links the task to the parent", () => {
       value: 4
     }
   );
+  assert.deepEqual(patch.find((field) => field.path === "/fields/System.AreaPath"), {
+    op: "add",
+    path: "/fields/System.AreaPath",
+    value: "CRM\\Playbook-CO-SF"
+  });
+  assert.deepEqual(patch.find((field) => field.path === "/fields/System.IterationPath"), {
+    op: "add",
+    path: "/fields/System.IterationPath",
+    value: "CRM\\ContinuidadCSF\\Sprint 11"
+  });
+  assert.deepEqual(patch.find((field) => field.path === "/fields/System.AssignedTo"), {
+    op: "add",
+    path: "/fields/System.AssignedTo",
+    value: "usuario@empresa.com"
+  });
   assert.deepEqual(patch.find((field) => field.path === "/fields/Microsoft.VSTS.CMMI.TaskType"), {
     op: "add",
     path: "/fields/Microsoft.VSTS.CMMI.TaskType",
@@ -141,6 +211,8 @@ test("normalizeTask defaults originalEstimate to remainingWork", () => {
     title: "Task",
     description: "Detalle",
     assignedTo: undefined,
+    areaPath: undefined,
+    iterationPath: undefined,
     taskType: undefined,
     remainingWork: 6,
     originalEstimate: 6,

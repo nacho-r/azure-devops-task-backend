@@ -36,6 +36,16 @@ export function buildProjectsApiUrl({ org }) {
   return `https://dev.azure.com/${org}/_apis/projects?api-version=${API_VERSION}`;
 }
 
+export function buildClassificationNodesApiUrl({ org, project, structureGroup, depth = 10 }) {
+  assertConfig({ org, project });
+
+  const encodedProject = encodeURIComponent(project);
+  const encodedGroup = encodeURIComponent(structureGroup);
+  return `https://dev.azure.com/${org}/${encodedProject}/_apis/wit/classificationnodes/${encodedGroup}?$depth=${encodeURIComponent(
+    depth
+  )}&api-version=${API_VERSION}`;
+}
+
 export function buildWiqlApiUrl({ org, project, top = 10 }) {
   assertConfig({ org, project });
 
@@ -89,6 +99,8 @@ export function buildTaskPatchDocument({
   ];
 
   addOptionalField(patch, "/fields/System.Description", task.description);
+  addOptionalField(patch, "/fields/System.AreaPath", task.areaPath);
+  addOptionalField(patch, "/fields/System.IterationPath", task.iterationPath);
   addOptionalField(patch, "/fields/System.AssignedTo", task.assignedTo);
   addOptionalField(patch, "/fields/Microsoft.VSTS.Scheduling.RemainingWork", task.remainingWork);
   addOptionalField(
@@ -232,6 +244,60 @@ export async function listProjects({ org, pat, fetchImpl = fetch }) {
   }));
 }
 
+export async function listClassificationNodes({
+  org,
+  project,
+  pat,
+  structureGroup,
+  search,
+  limit = 50,
+  depth = 10,
+  fetchImpl = fetch
+}) {
+  assertConfig({ org, project });
+
+  if (!["Areas", "Iterations"].includes(structureGroup)) {
+    throw new Error("structureGroup must be Areas or Iterations");
+  }
+
+  if (!pat) {
+    throw new Error("PAT is required to list Azure DevOps classification nodes");
+  }
+
+  const response = await fetchImpl(
+    buildClassificationNodesApiUrl({ org, project, structureGroup, depth }),
+    {
+      method: "GET",
+      headers: {
+        Authorization: buildBasicAuthHeader(pat),
+        Accept: "application/json"
+      }
+    }
+  );
+
+  const body = await readJsonSafely(response);
+
+  if (!response.ok) {
+    const message = body?.message || body?.error?.message || `Azure DevOps returned ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.azureResponse = body;
+    throw error;
+  }
+
+  const nodes = flattenClassificationNodes(body);
+  const normalizedSearch = search ? String(search).toLowerCase().trim() : "";
+  const filteredNodes = normalizedSearch
+    ? nodes.filter((node) =>
+        [node.name, node.path]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedSearch))
+      )
+    : nodes;
+
+  return filteredNodes.slice(0, limit);
+}
+
 export async function searchWorkItemsByIdPrefix({
   org,
   project,
@@ -343,6 +409,33 @@ export function buildWorkItemIdPrefixRange(idPrefix, idLength = 6) {
     min: Number(normalizedPrefix.padEnd(idLength, "0")),
     max: Number(normalizedPrefix.padEnd(idLength, "9"))
   };
+}
+
+export function flattenClassificationNodes(rootNode) {
+  const nodes = [];
+
+  function visit(node, parentPath) {
+    if (!node?.name) {
+      return;
+    }
+
+    const path = parentPath ? `${parentPath}\\${node.name}` : node.name;
+
+    nodes.push({
+      id: node.id,
+      name: node.name,
+      path,
+      structureType: node.structureType,
+      hasChildren: Boolean(node.hasChildren),
+      startDate: node.attributes?.startDate,
+      finishDate: node.attributes?.finishDate
+    });
+
+    (node.children || []).forEach((child) => visit(child, path));
+  }
+
+  visit(rootNode, "");
+  return nodes;
 }
 
 export function buildBasicAuthHeader(pat) {

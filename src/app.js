@@ -2,6 +2,7 @@ import express from "express";
 import crypto from "node:crypto";
 import {
   createChildTask,
+  listClassificationNodes,
   listFields,
   listProjects,
   searchWorkItemsByIdPrefix
@@ -117,6 +118,43 @@ export function createApp({
     }
   });
 
+  app.get("/api/classification-nodes", async (req, res) => {
+    const activePat = getSessionPat(req);
+    const activeProject = req.query.project ? String(req.query.project).trim() : project;
+    const type = req.query.type ? String(req.query.type).toLowerCase().trim() : "";
+    const structureGroup = type === "areas" ? "Areas" : type === "iterations" ? "Iterations" : "";
+
+    if (!structureGroup) {
+      return res.status(400).json({
+        ok: false,
+        error: "Tipo de clasificacion invalido."
+      });
+    }
+
+    try {
+      const nodes = await listClassificationNodes({
+        org,
+        project: activeProject,
+        pat: activePat,
+        structureGroup,
+        search: req.query.q,
+        limit: 50,
+        fetchImpl
+      });
+
+      res.json({
+        ok: true,
+        count: nodes.length,
+        nodes
+      });
+    } catch (error) {
+      res.status(error.status || 500).json({
+        ok: false,
+        error: summarizeAzureReadError(error)
+      });
+    }
+  });
+
   app.get("/api/work-items/search", async (req, res) => {
     const activePat = getSessionPat(req);
     const activeProject = req.query.project ? String(req.query.project).trim() : project;
@@ -159,16 +197,33 @@ export function createApp({
     const activeProject = req.body.project ? String(req.body.project).trim() : project;
     const dryRun = req.body.dryRun !== false;
     const activePat = getSessionPat(req);
+    const activeAreaPath = req.body.areaPath ? String(req.body.areaPath).trim() : undefined;
+    const activeIterationPath = req.body.iterationPath
+      ? String(req.body.iterationPath).trim()
+      : undefined;
+    const activeAssignedTo = req.body.assignedTo ? String(req.body.assignedTo).trim() : undefined;
     const activeTaskTypeField = req.body.taskTypeField
       ? String(req.body.taskTypeField).trim()
       : taskTypeField;
-    const tasks = req.body.tasks.map(normalizeTask);
+    const tasks = req.body.tasks.map((task) => {
+      const normalizedTask = normalizeTask(task);
+
+      return {
+        ...normalizedTask,
+        assignedTo: normalizedTask.assignedTo || activeAssignedTo,
+        areaPath: normalizedTask.areaPath || activeAreaPath,
+        iterationPath: normalizedTask.iterationPath || activeIterationPath
+      };
+    });
 
     if (dryRun) {
       return res.json({
         ok: true,
         dryRun: true,
         project: activeProject,
+        areaPath: activeAreaPath,
+        iterationPath: activeIterationPath,
+        assignedTo: activeAssignedTo,
         parentId,
         total: tasks.length,
         tasks: buildDryRunTaskResults(tasks)
@@ -213,6 +268,9 @@ export function createApp({
       ok: failed === 0,
       dryRun: false,
       project: activeProject,
+      areaPath: activeAreaPath,
+      iterationPath: activeIterationPath,
+      assignedTo: activeAssignedTo,
       parentId,
       total: results.length,
       created,
