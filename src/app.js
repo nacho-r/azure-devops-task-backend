@@ -2,6 +2,7 @@ import express from "express";
 import crypto from "node:crypto";
 import {
   createChildTask,
+  getWorkItemClassification,
   listClassificationNodes,
   listFields,
   listProjects,
@@ -202,17 +203,43 @@ export function createApp({
       ? String(req.body.iterationPath).trim()
       : undefined;
     const activeAssignedTo = req.body.assignedTo ? String(req.body.assignedTo).trim() : undefined;
+    const inheritParentClassification = req.body.inheritParentClassification === true;
+    let resolvedAreaPath = activeAreaPath;
+    let resolvedIterationPath = activeIterationPath;
     const activeTaskTypeField = req.body.taskTypeField
       ? String(req.body.taskTypeField).trim()
       : taskTypeField;
+
+    if (inheritParentClassification) {
+      try {
+        const parentClassification = await getWorkItemClassification({
+          org,
+          project: activeProject,
+          pat: activePat,
+          workItemId: parentId,
+          fetchImpl
+        });
+
+        resolvedAreaPath = parentClassification.areaPath;
+        resolvedIterationPath = parentClassification.iterationPath;
+      } catch (error) {
+        return res.status(error.status || 500).json({
+          ok: false,
+          error: summarizeAzureReadError(error)
+        });
+      }
+    }
+
     const tasks = req.body.tasks.map((task) => {
       const normalizedTask = normalizeTask(task);
 
       return {
         ...normalizedTask,
         assignedTo: normalizedTask.assignedTo || activeAssignedTo,
-        areaPath: normalizedTask.areaPath || activeAreaPath,
-        iterationPath: normalizedTask.iterationPath || activeIterationPath
+        areaPath: inheritParentClassification ? resolvedAreaPath : normalizedTask.areaPath || resolvedAreaPath,
+        iterationPath: inheritParentClassification
+          ? resolvedIterationPath
+          : normalizedTask.iterationPath || resolvedIterationPath
       };
     });
 
@@ -221,8 +248,9 @@ export function createApp({
         ok: true,
         dryRun: true,
         project: activeProject,
-        areaPath: activeAreaPath,
-        iterationPath: activeIterationPath,
+        areaPath: resolvedAreaPath,
+        iterationPath: resolvedIterationPath,
+        inheritParentClassification,
         assignedTo: activeAssignedTo,
         parentId,
         total: tasks.length,
@@ -268,8 +296,9 @@ export function createApp({
       ok: failed === 0,
       dryRun: false,
       project: activeProject,
-      areaPath: activeAreaPath,
-      iterationPath: activeIterationPath,
+      areaPath: resolvedAreaPath,
+      iterationPath: resolvedIterationPath,
+      inheritParentClassification,
       assignedTo: activeAssignedTo,
       parentId,
       total: results.length,

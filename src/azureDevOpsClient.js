@@ -393,6 +393,63 @@ export async function searchWorkItemsByIdPrefix({
   }));
 }
 
+export async function getWorkItemClassification({
+  org,
+  project,
+  pat,
+  workItemId,
+  fetchImpl = fetch
+}) {
+  assertConfig({ org, project });
+
+  if (!workItemId) {
+    throw new Error("workItemId is required");
+  }
+
+  if (!pat) {
+    throw new Error("PAT is required to read Azure DevOps work item classification");
+  }
+
+  const response = await fetchImpl(
+    buildWorkItemsListApiUrl({
+      org,
+      project,
+      ids: [workItemId],
+      fields: ["System.AreaPath", "System.IterationPath"]
+    }),
+    {
+      method: "GET",
+      headers: {
+        Authorization: buildBasicAuthHeader(pat),
+        Accept: "application/json"
+      }
+    }
+  );
+
+  const body = await readJsonSafely(response);
+
+  if (!response.ok) {
+    const message = body?.message || body?.error?.message || `Azure DevOps returned ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.azureResponse = body;
+    throw error;
+  }
+
+  const workItem = body?.value?.[0];
+
+  if (!workItem) {
+    const error = new Error("Work item not found");
+    error.status = 404;
+    throw error;
+  }
+
+  return {
+    areaPath: workItem.fields?.["System.AreaPath"] || undefined,
+    iterationPath: workItem.fields?.["System.IterationPath"] || undefined
+  };
+}
+
 export function buildWorkItemIdPrefixRange(idPrefix, idLength = 6) {
   const normalizedPrefix = String(idPrefix || "").trim();
 

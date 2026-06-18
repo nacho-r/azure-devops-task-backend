@@ -9,6 +9,7 @@ import {
   buildWorkItemsListApiUrl,
   buildWorkItemIdPrefixRange,
   flattenClassificationNodes,
+  getWorkItemClassification,
   buildWorkItemApiUrl,
   buildWorkItemReferenceUrl,
   listProjects,
@@ -362,4 +363,45 @@ test("searchWorkItemsByIdPrefix returns only sanitized work item fields", async 
       url: "https://example.test/work-item/415192"
     }
   ]);
+});
+
+test("getWorkItemClassification returns parent area and iteration only", async () => {
+  const requests = [];
+  const result = await getWorkItemClassification({
+    org: "achsdev",
+    project: "CRM",
+    pat: "fake-pat",
+    workItemId: "415192",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+
+      return new Response(
+        JSON.stringify({
+          value: [
+            {
+              id: 415192,
+              fields: {
+                "System.AreaPath": "CRM\\Playbook-CO-SF",
+                "System.IterationPath": "CRM\\ContinuidadCSF\\Sprint 11",
+                "System.Title": "No debe salir"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      );
+    }
+  });
+
+  assert.equal(requests.length, 1);
+  assert.match(String(requests[0].url), /fields=System.AreaPath%2CSystem.IterationPath/);
+  assert.deepEqual(result, {
+    areaPath: "CRM\\Playbook-CO-SF",
+    iterationPath: "CRM\\ContinuidadCSF\\Sprint 11"
+  });
 });
