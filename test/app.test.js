@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildDryRunTaskResults, summarizeCreateError } from "../src/app.js";
+import {
+  buildDryRunTaskResults,
+  chooseInheritedClassificationPath,
+  summarizeCreateError
+} from "../src/app.js";
 
 test("buildDryRunTaskResults returns only sanitized validation results", () => {
   const results = buildDryRunTaskResults([
@@ -43,4 +47,16 @@ test("summarizeCreateError does not expose raw Azure error details", () => {
   assert.equal(summary, "Azure DevOps rechazo la task por campos requeridos o vacios.");
   assert.equal(summary.includes("TF401320"), false);
   assert.equal(summary.includes("System.Description"), false);
+});
+
+test("chooseInheritedClassificationPath keeps specific fallback when fetched path is project root", () => {
+  assert.equal(
+    chooseInheritedClassificationPath("CRM", "CRM\\Playbook-CO-SF", "CRM"),
+    "CRM\\Playbook-CO-SF"
+  );
+  assert.equal(
+    chooseInheritedClassificationPath("CRM\\Playbook-CO-SF", "CRM\\Otro", "CRM"),
+    "CRM\\Playbook-CO-SF"
+  );
+  assert.equal(chooseInheritedClassificationPath("", "CRM\\Otro", "CRM"), "CRM\\Otro");
 });

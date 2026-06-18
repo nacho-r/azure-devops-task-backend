@@ -220,8 +220,16 @@ export function createApp({
           fetchImpl
         });
 
-        resolvedAreaPath = parentClassification.areaPath;
-        resolvedIterationPath = parentClassification.iterationPath;
+        resolvedAreaPath = chooseInheritedClassificationPath(
+          parentClassification.areaPath,
+          activeAreaPath,
+          activeProject
+        );
+        resolvedIterationPath = chooseInheritedClassificationPath(
+          parentClassification.iterationPath,
+          activeIterationPath,
+          activeProject
+        );
       } catch (error) {
         return res.status(error.status || 500).json({
           ok: false,
@@ -403,6 +411,27 @@ export function summarizeAzureReadError(error) {
   }
 
   return "No se pudo consultar Azure DevOps.";
+}
+
+export function chooseInheritedClassificationPath(fetchedPath, fallbackPath, project) {
+  const normalizedFetchedPath = fetchedPath ? String(fetchedPath).trim() : "";
+  const normalizedFallbackPath = fallbackPath ? String(fallbackPath).trim() : "";
+  const normalizedProject = project ? String(project).trim() : "";
+
+  if (!normalizedFetchedPath) {
+    return normalizedFallbackPath || undefined;
+  }
+
+  if (
+    normalizedFallbackPath &&
+    normalizedProject &&
+    normalizedFetchedPath.toLowerCase() === normalizedProject.toLowerCase() &&
+    normalizedFallbackPath.toLowerCase() !== normalizedProject.toLowerCase()
+  ) {
+    return normalizedFallbackPath;
+  }
+
+  return normalizedFetchedPath;
 }
 
 function getSessionPat(req) {

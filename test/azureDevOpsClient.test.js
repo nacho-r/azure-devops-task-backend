@@ -4,6 +4,7 @@ import {
   buildClassificationNodesApiUrl,
   buildProjectsApiUrl,
   buildTaskPatchDocument,
+  buildWorkItemDetailsApiUrl,
   createChildTask,
   buildWiqlApiUrl,
   buildWorkItemsListApiUrl,
@@ -30,6 +31,19 @@ test("buildWorkItemReferenceUrl creates parent reference url", () => {
     "https://dev.azure.com/achsdev/CRM/_apis/wit/workItems/410960"
   );
 });
+
+test("buildWorkItemDetailsApiUrl creates work item field query url", () => {
+  assert.equal(
+    buildWorkItemDetailsApiUrl({
+      org: "achsdev",
+      project: "CRM",
+      workItemId: "410960",
+      fields: ["System.AreaPath", "System.IterationPath"]
+    }),
+    "https://dev.azure.com/achsdev/CRM/_apis/wit/workitems/410960?api-version=7.1&fields=System.AreaPath%2CSystem.IterationPath"
+  );
+});
+
 
 test("buildProjectsApiUrl creates the projects endpoint", () => {
   assert.equal(
@@ -331,6 +345,8 @@ test("searchWorkItemsByIdPrefix returns only sanitized work item fields", async 
                 "System.Title": "Gestion de grupos",
                 "System.WorkItemType": "User Story",
                 "System.State": "Active",
+                "System.AreaPath": "CRM\\Playbook-CO-SF",
+                "System.IterationPath": "CRM\\ContinuidadCSF\\Sprint 11",
                 "System.Description": "No debe salir"
               },
               _links: {
@@ -360,6 +376,8 @@ test("searchWorkItemsByIdPrefix returns only sanitized work item fields", async 
       title: "Gestion de grupos",
       type: "User Story",
       state: "Active",
+      areaPath: "CRM\\Playbook-CO-SF",
+      iterationPath: "CRM\\ContinuidadCSF\\Sprint 11",
       url: "https://example.test/work-item/415192"
     }
   ]);
@@ -377,16 +395,12 @@ test("getWorkItemClassification returns parent area and iteration only", async (
 
       return new Response(
         JSON.stringify({
-          value: [
-            {
-              id: 415192,
-              fields: {
-                "System.AreaPath": "CRM\\Playbook-CO-SF",
-                "System.IterationPath": "CRM\\ContinuidadCSF\\Sprint 11",
-                "System.Title": "No debe salir"
-              }
-            }
-          ]
+          id: 415192,
+          fields: {
+            "System.AreaPath": "CRM\\Playbook-CO-SF",
+            "System.IterationPath": "CRM\\ContinuidadCSF\\Sprint 11",
+            "System.Title": "No debe salir"
+          }
         }),
         {
           status: 200,
@@ -399,6 +413,7 @@ test("getWorkItemClassification returns parent area and iteration only", async (
   });
 
   assert.equal(requests.length, 1);
+  assert.match(String(requests[0].url), /\/_apis\/wit\/workitems\/415192\?/);
   assert.match(String(requests[0].url), /fields=System.AreaPath%2CSystem.IterationPath/);
   assert.deepEqual(result, {
     areaPath: "CRM\\Playbook-CO-SF",

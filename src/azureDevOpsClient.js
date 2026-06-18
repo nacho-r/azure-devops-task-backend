@@ -23,6 +23,28 @@ export function buildWorkItemReferenceUrl({ org, project, workItemId }) {
   return `https://dev.azure.com/${org}/${encodedProject}/_apis/wit/workItems/${workItemId}`;
 }
 
+export function buildWorkItemDetailsApiUrl({ org, project, workItemId, fields = [] }) {
+  assertConfig({ org, project });
+
+  if (!workItemId) {
+    throw new Error("workItemId is required");
+  }
+
+  const encodedProject = encodeURIComponent(project);
+  const params = new URLSearchParams({
+    "api-version": API_VERSION
+  });
+
+  if (fields.length > 0) {
+    params.set("fields", fields.join(","));
+  }
+
+  return `https://dev.azure.com/${org}/${encodedProject}/_apis/wit/workitems/${encodeURIComponent(
+    workItemId
+  )}?${params.toString()}`;
+}
+
+
 export function buildFieldsApiUrl({ org, project }) {
   assertConfig({ org, project });
 
@@ -360,7 +382,14 @@ export async function searchWorkItemsByIdPrefix({
       org,
       project,
       ids,
-      fields: ["System.Id", "System.Title", "System.WorkItemType", "System.State"]
+      fields: [
+        "System.Id",
+        "System.Title",
+        "System.WorkItemType",
+        "System.State",
+        "System.AreaPath",
+        "System.IterationPath"
+      ]
     }),
     {
       method: "GET",
@@ -389,6 +418,8 @@ export async function searchWorkItemsByIdPrefix({
     title: workItem.fields?.["System.Title"] || "",
     type: workItem.fields?.["System.WorkItemType"] || "",
     state: workItem.fields?.["System.State"] || "",
+    areaPath: workItem.fields?.["System.AreaPath"] || "",
+    iterationPath: workItem.fields?.["System.IterationPath"] || "",
     url: workItem._links?.html?.href
   }));
 }
@@ -411,10 +442,10 @@ export async function getWorkItemClassification({
   }
 
   const response = await fetchImpl(
-    buildWorkItemsListApiUrl({
+    buildWorkItemDetailsApiUrl({
       org,
       project,
-      ids: [workItemId],
+      workItemId,
       fields: ["System.AreaPath", "System.IterationPath"]
     }),
     {
@@ -436,7 +467,7 @@ export async function getWorkItemClassification({
     throw error;
   }
 
-  const workItem = body?.value?.[0];
+  const workItem = body?.id ? body : undefined;
 
   if (!workItem) {
     const error = new Error("Work item not found");
