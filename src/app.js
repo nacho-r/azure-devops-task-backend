@@ -382,8 +382,12 @@ export function summarizeCreateError(error) {
     return "No se encontro el proyecto, work item padre o endpoint configurado.";
   }
 
-  if (error?.status === 400 && /required|invalidempty|tf401320/i.test(error.message)) {
-    return "Azure DevOps rechazo la task por campos requeridos o vacios.";
+  if (error?.status === 400) {
+    const badRequestReason = summarizeAzureBadRequest(error);
+
+    if (badRequestReason) {
+      return badRequestReason;
+    }
   }
 
   if (error?.status) {
@@ -391,6 +395,53 @@ export function summarizeCreateError(error) {
   }
 
   return "No se pudo crear la task.";
+}
+
+function summarizeAzureBadRequest(error) {
+  const details = [
+    error?.message,
+    error?.azureResponse?.message,
+    error?.azureResponse?.error?.message,
+    ...(Array.isArray(error?.azureResponse?.value)
+      ? error.azureResponse.value.map((item) => item?.message)
+      : [])
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (!details) {
+    return "";
+  }
+
+  if (/assigned\s*to|identity|identidad|usuario asignado|unknown identity|not a recognized identity/i.test(details)) {
+    return "Azure DevOps no reconoce el usuario asignado. Revisa el correo o deja Asignado a vacio.";
+  }
+
+  if (/area\s*path|system\.areapath|classification node.*area|area.*does not exist|area.*invalid/i.test(details)) {
+    return "El area seleccionada no existe o no es valida para el proyecto.";
+  }
+
+  if (
+    /iteration\s*path|system\.iterationpath|classification node.*iteration|iteration.*does not exist|iteracion|iteración/i.test(
+      details
+    )
+  ) {
+    return "La iteracion seleccionada no existe o no es valida para el proyecto.";
+  }
+
+  if (/custom\.tasktypedev|task\s*type|tipo de tarea|not in the list|supported values|picklist/i.test(details)) {
+    return "El tipo de tarea no es valido para el campo configurado en Azure DevOps.";
+  }
+
+  if (/field.*does not exist|field.*not found|reference name|custom field|campo.*no existe/i.test(details)) {
+    return "Hay un campo configurado que no existe o no aplica para Tasks en este proyecto.";
+  }
+
+  if (/required|invalidempty|tf401320/i.test(details)) {
+    return "Azure DevOps rechazo la task por campos requeridos o vacios.";
+  }
+
+  return "";
 }
 
 export function summarizeAzureReadError(error) {
