@@ -71,6 +71,18 @@ test("summarizeCreateError explains invalid task type values", () => {
   );
 });
 
+test("summarizeCreateError explains invalid activity values", () => {
+  const error = new Error(
+    "The field 'Microsoft.VSTS.Common.Activity' contains the value 'requeriments' that is not in the list of supported values."
+  );
+  error.status = 400;
+
+  assert.equal(
+    summarizeCreateError(error),
+    "La actividad no es valida para el campo configurado en Azure DevOps."
+  );
+});
+
 test("summarizeCreateError explains invalid classification paths", () => {
   const areaError = new Error("TF401347: Invalid tree name given for work item - System.AreaPath.");
   areaError.status = 400;

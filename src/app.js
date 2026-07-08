@@ -19,6 +19,7 @@ export function createApp({
   org = process.env.AZURE_DEVOPS_ORG || "achsdev",
   project = process.env.AZURE_DEVOPS_PROJECT || "CRM",
   taskTypeField = process.env.AZURE_DEVOPS_TASK_TYPE_FIELD || "Microsoft.VSTS.CMMI.TaskType",
+  activityField = process.env.AZURE_DEVOPS_ACTIVITY_FIELD || "Microsoft.VSTS.Common.Activity",
   frontendUrl = process.env.FRONTEND_URL,
   fetchImpl
 } = {}) {
@@ -209,6 +210,9 @@ export function createApp({
     const activeTaskTypeField = req.body.taskTypeField
       ? String(req.body.taskTypeField).trim()
       : taskTypeField;
+    const activeActivityField = req.body.activityField
+      ? String(req.body.activityField).trim()
+      : activityField;
 
     if (inheritParentClassification) {
       try {
@@ -277,6 +281,7 @@ export function createApp({
           parentId,
           task,
           taskTypeField: activeTaskTypeField,
+          activityField: activeActivityField,
           fetchImpl
         });
 
@@ -427,6 +432,10 @@ function summarizeAzureBadRequest(error) {
     )
   ) {
     return "La iteracion seleccionada no existe o no es valida para el proyecto.";
+  }
+
+  if (/microsoft\.vsts\.common\.activity|activity|actividad/i.test(details)) {
+    return "La actividad no es valida para el campo configurado en Azure DevOps.";
   }
 
   if (/custom\.tasktypedev|task\s*type|tipo de tarea|not in the list|supported values|picklist/i.test(details)) {

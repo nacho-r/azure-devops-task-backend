@@ -148,6 +148,7 @@ test("buildTaskPatchDocument links the task to the parent", () => {
       areaPath: "CRM\\Playbook-CO-SF",
       iterationPath: "CRM\\ContinuidadCSF\\Sprint 11",
       taskType: "Development",
+      activity: "Testing",
       tags: "CRM; Automatizacion"
     }
   });
@@ -181,6 +182,11 @@ test("buildTaskPatchDocument links the task to the parent", () => {
     op: "add",
     path: "/fields/Microsoft.VSTS.CMMI.TaskType",
     value: "Development"
+  });
+  assert.deepEqual(patch.find((field) => field.path === "/fields/Microsoft.VSTS.Common.Activity"), {
+    op: "add",
+    path: "/fields/Microsoft.VSTS.Common.Activity",
+    value: "Testing"
   });
 
   const relation = patch.at(-1);
@@ -229,6 +235,7 @@ test("normalizeTask defaults originalEstimate to remainingWork", () => {
     areaPath: undefined,
     iterationPath: undefined,
     taskType: undefined,
+    activity: undefined,
     remainingWork: 6,
     originalEstimate: 6,
     tags: undefined

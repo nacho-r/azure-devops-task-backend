@@ -2,6 +2,7 @@ const API_VERSION = "7.1";
 const TASK_WORK_ITEM_TYPE = "Task";
 const PARENT_RELATION_TYPE = "System.LinkTypes.Hierarchy-Reverse";
 const DEFAULT_TASK_TYPE_FIELD = "Microsoft.VSTS.CMMI.TaskType";
+const DEFAULT_ACTIVITY_FIELD = "Microsoft.VSTS.Common.Activity";
 
 export function buildWorkItemApiUrl({ org, project, workItemType = TASK_WORK_ITEM_TYPE }) {
   assertConfig({ org, project });
@@ -102,7 +103,8 @@ export function buildTaskPatchDocument({
   project,
   parentId,
   task,
-  taskTypeField = DEFAULT_TASK_TYPE_FIELD
+  taskTypeField = DEFAULT_TASK_TYPE_FIELD,
+  activityField = DEFAULT_ACTIVITY_FIELD
 }) {
   if (!parentId) {
     throw new Error("parentId is required");
@@ -131,6 +133,7 @@ export function buildTaskPatchDocument({
     task.originalEstimate
   );
   addOptionalField(patch, `/fields/${taskTypeField}`, task.taskType);
+  addOptionalField(patch, `/fields/${activityField}`, task.activity);
   addOptionalField(patch, "/fields/System.Tags", task.tags);
 
   patch.push({
@@ -155,6 +158,7 @@ export async function createChildTask({
   parentId,
   task,
   taskTypeField = DEFAULT_TASK_TYPE_FIELD,
+  activityField = DEFAULT_ACTIVITY_FIELD,
   fetchImpl = fetch
 }) {
   assertConfig({ org, project });
@@ -163,7 +167,14 @@ export async function createChildTask({
     throw new Error("PAT is required when dryRun is false");
   }
 
-  const patchDocument = buildTaskPatchDocument({ org, project, parentId, task, taskTypeField });
+  const patchDocument = buildTaskPatchDocument({
+    org,
+    project,
+    parentId,
+    task,
+    taskTypeField,
+    activityField
+  });
   const response = await fetchImpl(buildWorkItemApiUrl({ org, project }), {
     method: "POST",
     headers: {

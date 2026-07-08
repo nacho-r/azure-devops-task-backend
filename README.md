@@ -7,6 +7,7 @@ Backend inicial para crear `Task` hijas masivamente en Azure DevOps.
 - Crea work items de tipo `Task`.
 - Vincula cada task al work item padre con `System.LinkTypes.Hierarchy-Reverse`.
 - Recibe `taskType` por task.
+- Recibe `activity` por task como campo opcional.
 - Recibe `originalEstimate` u `originalEstimateHH`; si no viene, usa el mismo valor de `remainingWork`.
 - Usa el PAT ingresado desde el login local y lo mantiene solo en sesion del backend.
 - Soporta `dryRun: true` para validar el request sin llamar a Azure DevOps.
@@ -30,6 +31,7 @@ FRONTEND_URL=http://localhost:5173
 AZURE_DEVOPS_ORG=achsdev
 AZURE_DEVOPS_PROJECT=CRM
 AZURE_DEVOPS_TASK_TYPE_FIELD=Custom.TasktypeDev
+AZURE_DEVOPS_ACTIVITY_FIELD=Microsoft.VSTS.Common.Activity
 ```
 
 El PAT no se configura en `.env`. Cada usuario debe ingresarlo desde la pantalla de login local.
@@ -55,17 +57,25 @@ FRONTEND_URL=https://tu-front.netlify.app
 AZURE_DEVOPS_ORG=achsdev
 AZURE_DEVOPS_PROJECT=CRM
 AZURE_DEVOPS_TASK_TYPE_FIELD=Custom.TasktypeDev
+AZURE_DEVOPS_ACTIVITY_FIELD=Microsoft.VSTS.Common.Activity
 ```
 
 Con `NODE_ENV=production`, la cookie PAT se emite con `Secure` y `SameSite=None` para permitir llamadas desde el frontend publicado.
 
 `AZURE_DEVOPS_TASK_TYPE_FIELD` es el reference name del campo que Azure DevOps usa para "Task Type".
 Si tu proceso usa otro campo custom, cambia ese valor en `.env`.
+`AZURE_DEVOPS_ACTIVITY_FIELD` es el reference name del campo que Azure DevOps usa para "Activity".
 
 Para buscar el reference name real desde Azure DevOps:
 
 ```bash
 curl "http://localhost:3000/api/azure/fields?search=Task%20type"
+```
+
+Para activity:
+
+```bash
+curl "http://localhost:3000/api/azure/fields?search=Activity"
 ```
 
 Usa el valor `referenceName` que devuelva Azure DevOps, no el nombre visible del formulario.
@@ -119,6 +129,17 @@ Reuniones
 Ceremonias Scrum
 ```
 
+Valores disponibles para `activity` cuando se envia:
+
+```text
+Testing
+deployment
+design
+development
+documentation
+requeriments
+```
+
 Orden de columnas al pegar:
 
 ```text
@@ -148,6 +169,7 @@ curl -X POST http://localhost:3000/api/tasks/bulk \
         "remainingWork": 4,
         "originalEstimate": 4,
         "taskType": "Development",
+        "activity": "Testing",
         "tags": ["CRM", "Automatizacion"]
       }
     ]
@@ -171,7 +193,8 @@ curl -X POST http://localhost:3000/api/tasks/bulk \
         "description": "Validar formulario",
         "remainingWork": 4,
         "originalEstimateHH": 4,
-        "taskType": "Development"
+        "taskType": "Development",
+        "activity": "Testing"
       }
     ]
   }'
