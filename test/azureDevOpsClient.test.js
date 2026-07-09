@@ -186,7 +186,7 @@ test("buildTaskPatchDocument links the task to the parent", () => {
   assert.deepEqual(patch.find((field) => field.path === "/fields/Microsoft.VSTS.Common.Activity"), {
     op: "add",
     path: "/fields/Microsoft.VSTS.Common.Activity",
-    value: "TESTING"
+    value: "Testing"
   });
 
   const relation = patch.at(-1);
@@ -243,7 +243,7 @@ test("normalizeTask defaults originalEstimate to remainingWork", () => {
 });
 
 test("normalizeTask normalizes activity to Azure values", () => {
-  assert.equal(normalizeTask({ title: "Task", description: "Detalle", activity: "Testing" }).activity, "TESTING");
+  assert.equal(normalizeTask({ title: "Task", description: "Detalle", activity: "TESTING" }).activity, "Testing");
 });
 
 test("createChildTask returns only sanitized Azure fields", async () => {

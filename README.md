@@ -132,12 +132,12 @@ Ceremonias Scrum
 Valores disponibles para `activity` cuando se envia:
 
 ```text
-TESTING
-DEPLOYMENT
-DESIGN
-DEVELOPMENT
-DOCUMENTATION
-REQUERIMENTS
+Testing
+Deployment
+Design
+Development
+Documentation
+Requeriments
 ```
 
 Orden de columnas al pegar:
@@ -169,7 +169,7 @@ curl -X POST http://localhost:3000/api/tasks/bulk \
         "remainingWork": 4,
         "originalEstimate": 4,
         "taskType": "Development",
-        "activity": "TESTING",
+        "activity": "Testing",
         "tags": ["CRM", "Automatizacion"]
       }
     ]
@@ -194,7 +194,7 @@ curl -X POST http://localhost:3000/api/tasks/bulk \
         "remainingWork": 4,
         "originalEstimateHH": 4,
         "taskType": "Development",
-        "activity": "TESTING"
+        "activity": "Testing"
       }
     ]
   }'
