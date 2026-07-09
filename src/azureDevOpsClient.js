@@ -1,3 +1,5 @@
+import { normalizeActivity } from "./activity.js";
+
 const API_VERSION = "7.1";
 const TASK_WORK_ITEM_TYPE = "Task";
 const PARENT_RELATION_TYPE = "System.LinkTypes.Hierarchy-Reverse";
@@ -133,7 +135,7 @@ export function buildTaskPatchDocument({
     task.originalEstimate
   );
   addOptionalField(patch, `/fields/${taskTypeField}`, task.taskType);
-  addOptionalField(patch, `/fields/${activityField}`, task.activity);
+  addOptionalField(patch, `/fields/${activityField}`, normalizeActivity(task.activity));
   addOptionalField(patch, "/fields/System.Tags", task.tags);
 
   patch.push({

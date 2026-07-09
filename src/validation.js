@@ -1,3 +1,5 @@
+import { normalizeActivity } from "./activity.js";
+
 export function validateBulkRequest(body) {
   const errors = [];
 
@@ -57,7 +59,7 @@ export function normalizeTask(task) {
     areaPath: task.areaPath ? String(task.areaPath).trim() : undefined,
     iterationPath: task.iterationPath ? String(task.iterationPath).trim() : undefined,
     taskType: task.taskType ? String(task.taskType).trim() : undefined,
-    activity: task.activity ? String(task.activity).trim() : undefined,
+    activity: normalizeActivity(task.activity),
     remainingWork,
     originalEstimate: explicitOriginalEstimate ?? remainingWork,
     tags: Array.isArray(task.tags) ? task.tags.join("; ") : task.tags
